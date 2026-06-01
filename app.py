@@ -1,5 +1,6 @@
 import streamlit as st
 import yfinance as yf
+import time
 import plotly.graph_objects as go
 import anthropic
 from datetime import datetime, timedelta
@@ -22,8 +23,9 @@ if st.sidebar.button("Analyze Stock 🚀"):
     else:
         with st.spinner(f"Fetching data for {ticker}..."):
             # Fetch stock data
+            time.sleep(2)
             stock = yf.Ticker(ticker)
-            hist = stock.history(period=period)
+            hist = stock.history(period=period, auto_adjust=True, timeout=30)
             info = stock.info
 
             if hist.empty:
