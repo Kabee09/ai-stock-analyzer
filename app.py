@@ -1,20 +1,23 @@
 import streamlit as st
 import yfinance as yf
-import time
 import plotly.graph_objects as go
 import anthropic
 from datetime import datetime, timedelta
+import time
+import pandas as pd
+from prophet import Prophet
 
 # Page config
 st.set_page_config(page_title="AI Stock Analyzer", page_icon="📈", layout="wide")
 
 st.title("📈 AI Stock Analyzer")
-st.markdown("*Powered by Claude AI + Real Market Data*")
+st.markdown("*Powered by Claude AI + Real Market Data + ML Predictions*")
 
 # Sidebar
 st.sidebar.header("Settings")
 ticker = st.sidebar.text_input("Stock Ticker", value="AAPL").upper()
 period = st.sidebar.selectbox("Time Period", ["1mo", "3mo", "6mo", "1y", "2y"], index=2)
+forecast_days = st.sidebar.slider("Forecast Days", 7, 90, 30)
 api_key = st.sidebar.text_input("Anthropic API Key", type="password")
 
 if st.sidebar.button("Analyze Stock 🚀"):
@@ -22,11 +25,13 @@ if st.sidebar.button("Analyze Stock 🚀"):
         st.error("Please enter your Anthropic API key in the sidebar.")
     else:
         with st.spinner(f"Fetching data for {ticker}..."):
-            # Fetch stock data
             time.sleep(2)
             stock = yf.Ticker(ticker)
             hist = stock.history(period=period, auto_adjust=True, timeout=30)
-            info = stock.info
+            try:
+                info = stock.info
+            except:
+                info = {}
 
             if hist.empty:
                 st.error(f"Could not find data for ticker: {ticker}")
@@ -69,8 +74,73 @@ if st.sidebar.button("Analyze Stock 🚀"):
                 fig2.update_layout(template="plotly_dark", height=200)
                 st.plotly_chart(fig2, use_container_width=True)
 
+                # ML Prediction
+                st.subheader(f"🤖 ML Price Prediction — Next {forecast_days} Days")
+                with st.spinner("Running Prophet forecasting model..."):
+                    try:
+                        # Prepare data for Prophet
+                        df_prophet = hist[['Close']].reset_index()
+                        df_prophet.columns = ['ds', 'y']
+                        df_prophet['ds'] = pd.to_datetime(df_prophet['ds']).dt.tz_localize(None)
+
+                        # Train Prophet model
+                        model = Prophet(daily_seasonality=True, yearly_seasonality=True)
+                        model.fit(df_prophet)
+
+                        # Make future predictions
+                        future = model.make_future_dataframe(periods=forecast_days)
+                        forecast = model.predict(future)
+
+                        # Plot prediction
+                        fig3 = go.Figure()
+
+                        # Historical prices
+                        fig3.add_trace(go.Scatter(
+                            x=df_prophet['ds'],
+                            y=df_prophet['y'],
+                            name='Historical Price',
+                            line=dict(color='#00b4d8')
+                        ))
+
+                        # Predicted prices
+                        future_forecast = forecast[forecast['ds'] > df_prophet['ds'].max()]
+                        fig3.add_trace(go.Scatter(
+                            x=future_forecast['ds'],
+                            y=future_forecast['yhat'],
+                            name='Predicted Price',
+                            line=dict(color='#ff9f1c', dash='dash')
+                        ))
+
+                        # Confidence interval
+                        fig3.add_trace(go.Scatter(
+                            x=pd.concat([future_forecast['ds'], future_forecast['ds'][::-1]]),
+                            y=pd.concat([future_forecast['yhat_upper'], future_forecast['yhat_lower'][::-1]]),
+                            fill='toself',
+                            fillcolor='rgba(255,159,28,0.1)',
+                            line=dict(color='rgba(255,255,255,0)'),
+                            name='Confidence Interval'
+                        ))
+
+                        fig3.update_layout(template="plotly_dark", height=400)
+                        st.plotly_chart(fig3, use_container_width=True)
+
+                        # Prediction summary
+                        last_price = current_price
+                        predicted_price = future_forecast['yhat'].iloc[-1]
+                        predicted_change = ((predicted_price - last_price) / last_price) * 100
+
+                        col1, col2, col3 = st.columns(3)
+                        col1.metric("Current Price", f"${last_price:.2f}")
+                        col2.metric(f"Predicted ({forecast_days}d)", f"${predicted_price:.2f}", f"{predicted_change:.2f}%")
+                        col3.metric("Prediction", "📈 Upward" if predicted_change > 0 else "📉 Downward")
+
+                        st.caption("⚠️ Predictions are for educational purposes only. Not financial advice.")
+
+                    except Exception as e:
+                        st.error(f"Prediction error: {e}")
+
                 # AI Analysis
-                st.subheader("🤖 AI Analysis")
+                st.subheader("🧠 Claude AI Analysis")
                 with st.spinner("Claude is analyzing the stock..."):
                     client = anthropic.Anthropic(api_key=api_key)
 
